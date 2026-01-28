@@ -12,8 +12,14 @@ from typing import Dict, Iterable, List, Optional, Tuple, Any
 
 import pandas as pd
 
-import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
+try:
+    import tkinter as tk
+    from tkinter import filedialog, messagebox, ttk
+except ImportError:
+    tk = None
+    filedialog = None
+    messagebox = None
+    ttk = None
 
 from openpyxl import load_workbook
 from openpyxl.utils import get_column_letter
@@ -789,7 +795,9 @@ def consolidar(
 # Interface gráfica (Tkinter)
 # -----------------------------
 
-class App(tk.Tk):
+AppBase = tk.Tk if tk else object
+
+class App(AppBase):
     """
     Interface gráfica para consolidação de planilhas Excel.
     
@@ -1152,6 +1160,9 @@ class App(tk.Tk):
 
 def main() -> None:
     """Ponto de entrada da aplicação GUI."""
+    if tk is None:
+        print("Tkinter não disponível. Execute em um ambiente com suporte a GUI ou use a interface web.")
+        return
     app = App()
     app.mainloop()
 
