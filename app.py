@@ -187,6 +187,24 @@ def create_excel_download(df_dados: pd.DataFrame, df_resumo: pd.DataFrame, sheet
     return output.getvalue()
 
 
+def create_csv_download_br(df: pd.DataFrame) -> str:
+    """
+    Cria CSV no padrão brasileiro (separador ; e decimal ,).
+    
+    Args:
+        df: DataFrame a exportar.
+    
+    Returns:
+        String CSV formatada no padrão brasileiro.
+    """
+    return df.to_csv(
+        index=False,
+        sep=';',           # Separador de campo: ponto-e-vírgula
+        decimal=',',       # Separador decimal: vírgula
+        encoding='utf-8-sig'  # BOM para Excel reconhecer UTF-8
+    )
+
+
 # ========================================
 # Interface Principal
 # ========================================
@@ -391,13 +409,15 @@ def main():
             )
         
         with col2:
-            csv_data = st.session_state.consolidated_df.to_csv(index=False)
+            # CSV no padrão brasileiro (separador ; e decimal ,)
+            csv_data = create_csv_download_br(st.session_state.consolidated_df)
             st.download_button(
-                label="📥 Download CSV",
+                label="📥 Download CSV (BR)",
                 data=csv_data,
                 file_name=f"consolidado_{timestamp}.csv",
                 mime="text/csv",
-                use_container_width=True
+                use_container_width=True,
+                help="CSV com separador ; e decimal , (padrão brasileiro)"
             )
 
 
