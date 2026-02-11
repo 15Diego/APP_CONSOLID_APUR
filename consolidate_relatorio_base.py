@@ -582,6 +582,10 @@ def consolidar_planilhas(planilhas: List[pd.DataFrame]) -> pd.DataFrame:
 
     cols = _colunas_final(planilhas)
     aligned = [df.reindex(columns=cols) for df in planilhas]
+    # Filtra DataFrames vazios/all-NA para evitar FutureWarning no concat
+    aligned = [df for df in aligned if not df.empty and not df.isna().all(axis=None)]
+    if not aligned:
+        return pd.DataFrame(columns=cols)
     return pd.concat(aligned, ignore_index=True)
 
 
