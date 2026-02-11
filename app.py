@@ -309,8 +309,7 @@ def main():
         process_button = st.button(
             "🔄 Consolidar Arquivos",
             type="primary",
-            disabled=not uploaded_files,
-            width="stretch"
+            disabled=not uploaded_files
         )
     
     st.divider()
@@ -362,7 +361,6 @@ def main():
         with tab1:
             st.dataframe(
                 st.session_state.consolidated_df,
-                width="stretch",
                 height=400
             )
             
@@ -379,7 +377,6 @@ def main():
         with tab2:
             st.dataframe(
                 st.session_state.summary_df,
-                width="stretch",
                 height=400
             )
         
@@ -404,8 +401,7 @@ def main():
                 data=excel_bytes,
                 file_name=default_filename,
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                type="primary",
-                width="stretch"
+                type="primary"
             )
         
         with col2:
@@ -416,7 +412,6 @@ def main():
                 data=csv_data,
                 file_name=f"consolidado_{timestamp}.csv",
                 mime="text/csv",
-                width="stretch",
                 help="CSV com separador ; e decimal , (padrão brasileiro)"
             )
 
