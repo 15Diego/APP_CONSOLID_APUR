@@ -5,6 +5,7 @@ import os
 import re
 import threading
 import logging
+import warnings
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
@@ -586,7 +587,10 @@ def consolidar_planilhas(planilhas: List[pd.DataFrame]) -> pd.DataFrame:
     aligned = [df for df in aligned if not df.empty and not df.isna().all(axis=None)]
     if not aligned:
         return pd.DataFrame(columns=cols)
-    return pd.concat(aligned, ignore_index=True)
+    
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=FutureWarning)
+        return pd.concat(aligned, ignore_index=True)
 
 
 # -----------------------------
