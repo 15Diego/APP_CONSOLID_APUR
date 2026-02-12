@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import List, Optional
 import io
 from datetime import datetime
+import gc
 
 # Import das funções do módulo principal
 from consolidate_relatorio_base import (
@@ -148,6 +149,16 @@ def process_uploaded_files(
     
     # Consolida DataFrames
     df_consolidado = consolidar_planilhas(dfs_ok)
+
+    # -----------------------------
+    # Otimização de Memória (Critical for OOM Fix)
+    # -----------------------------
+    # Libera memória dos DFs originais pois já temos o consolidado
+    del dfs_ok
+    for r in results:
+        r.df = None  # Remove referência circular/direta
+    gc.collect()
+    # -----------------------------
     
     # Gera resumo
     df_resumo = pd.DataFrame([
@@ -172,18 +183,19 @@ def process_uploaded_files(
 def create_excel_download(df_dados: pd.DataFrame, df_resumo: pd.DataFrame, sheet_name: str) -> bytes:
     """
     Cria arquivo Excel em memória para download.
-    
-    Args:
-        df_dados: DataFrame consolidado.
-        df_resumo: DataFrame de resumo.
-        sheet_name: Nome da aba de dados.
-    
-    Returns:
-        Bytes do arquivo Excel.
+    Usa XlsxWriter com otimização de memória (constant_memory=True).
     """
     output = io.BytesIO()
     
-    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+    # Força garbage collection antes do processo pesado de escrita
+    gc.collect()
+    
+    # Usa engine xlsxwriter com modo constant_memory para streaming (reduz drasticamente RAM)
+    with pd.ExcelWriter(
+        output,
+        engine="xlsxwriter",
+        engine_kwargs={'options': {'constant_memory': True}}
+    ) as writer:
         df_dados.to_excel(writer, sheet_name=sheet_name, index=False)
         df_resumo.to_excel(writer, sheet_name="Resumo", index=False)
     
