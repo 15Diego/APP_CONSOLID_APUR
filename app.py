@@ -20,6 +20,7 @@ from consolidate_relatorio_base import (
     consolidar_planilhas,
     salvar_excel,
     ReadResult,
+    FilterConfig,
 )
 
 
@@ -81,6 +82,7 @@ def process_uploaded_files(
     header_row: Optional[int],
     read_as_text: bool,
     add_audit: bool,
+    filtros: Optional[FilterConfig] = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, List[ReadResult]]:
     """
     Processa arquivos enviados pelo usuário.
@@ -127,6 +129,7 @@ def process_uploaded_files(
             header_row_0based=header_0based,
             read_as_text=read_as_text,
             adicionar_auditoria=add_audit,
+            filtros=filtros,
         )
         
         results.append(r)
@@ -268,6 +271,41 @@ def main():
                 value=True,
                 help="Aplica formatação profissional (tabelas, filtros, larguras)"
             )
+            
+        with st.expander("🔍 Filtros de Extração"):
+            st.caption("Deixe em branco para não filtrar.")
+            
+            f_cfop = st.text_input(
+                "CFOP",
+                placeholder="Ex: 5102, 6102",
+                help="Códigos separados por vírgula"
+            )
+            
+            f_tes = st.text_input(
+                "TES",
+                placeholder="Ex: 501, 502",
+                help="Códigos separados por vírgula"
+            )
+            
+            f_tm = st.text_input(
+                "Tipo de Movimento",
+                placeholder="Ex: VENDA, DEVOLUCAO",
+                help="Tipos separados por vírgula"
+            )
+            
+            f_desc = st.text_input(
+                "Descrição do Produto",
+                placeholder="Ex: PARAFUSO",
+                help="Filtrar produtos que contenham este termo"
+            )
+            
+            # Cria objeto de configuração de filtros
+            filtros = FilterConfig(
+                cfops=[x.strip() for x in f_cfop.split(",") if x.strip()],
+                tes=[x.strip() for x in f_tes.split(",") if x.strip()],
+                tipo_movimento=[x.strip() for x in f_tm.split(",") if x.strip()],
+                descricao_contem=f_desc.strip()
+            )
         
         st.divider()
         st.markdown("### 📝 Sobre")
@@ -325,6 +363,7 @@ def main():
                     header_row=header_row,
                     read_as_text=read_as_text,
                     add_audit=add_audit,
+                    filtros=filtros,
                 )
                 
                 # Salva em session state

@@ -62,6 +62,14 @@ class AuditColumn(str, Enum):
 
 
 @dataclass
+class FilterConfig:
+    """Configurações de filtragem de dados."""
+    cfops: List[str] = field(default_factory=list)
+    tes: List[str] = field(default_factory=list)
+    tipo_movimento: List[str] = field(default_factory=list)
+    descricao_contem: str = ""
+
+@dataclass
 class ConsolidationConfig:
     """Configurações centralizadas para consolidação."""
     preferred_sheet: str = DEFAULT_SHEET_NAME
@@ -394,6 +402,7 @@ def ler_planilha_robusta(
     header_row_0based: Optional[int] = None,
     read_as_text: bool = True,
     adicionar_auditoria: bool = True,
+    filtros: Optional[FilterConfig] = None,
 ) -> ReadResult:
     """
     Lê uma planilha Excel e retorna DataFrame + metadados.
@@ -463,6 +472,55 @@ def ler_planilha_robusta(
             df.insert(1, AuditColumn.SOURCE_SHEET.value, aba_real)
             df.insert(2, AuditColumn.HEADER_LINE.value, header + 1)  # 1-based
             df.insert(3, AuditColumn.ORIGINAL_ROW.value, pd.Series(range(linha_ini, linha_ini + len(df)), dtype="Int64"))
+
+        # Aplica filtros se configurados (APÓS auditoria para manter rastreabilidade de linhas originais)
+        if filtros:
+            # Normaliza nomes de colunas para busca
+            col_map = { _canon_text(c): c for c in df.columns }
+            
+            # Helper para encontrar coluna por lista de possíveis nomes/trechos
+            def find_col(possible_names: List[str]) -> Optional[str]:
+                for name in possible_names:
+                    canon_name = _canon_text(name)
+                    # Tentativa 1: Match exato normalizado
+                    if canon_name in col_map:
+                        return col_map[canon_name]
+                    # Tentativa 2: Contains (ex: "CFOP" in "CFOP DO PRODUTO")
+                    for c_canon, c_real in col_map.items():
+                        if canon_name in c_canon:
+                            return c_real
+                return None
+
+            # 1. Filtro de CFOP
+            if filtros.cfops:
+                col_cfop = find_col(["CFOP", "C.F.O.P"])
+                if col_cfop:
+                    mask = df[col_cfop].astype(str).str.strip().isin(filtros.cfops)
+                    df = df[mask]
+            
+            # 2. Filtro de TES
+            if filtros.tes:
+                col_tes = find_col(["TES", "T.E.S"])
+                if col_tes:
+                    mask = df[col_tes].astype(str).str.strip().isin(filtros.tes)
+                    df = df[mask]
+
+            # 3. Filtro de Tipo de Movimento
+            if filtros.tipo_movimento:
+                col_tm = find_col(["TIPO MOVIMENTO", "TP MOVIMENTO", "MOVIMENTO", "TP MOV"])
+                if col_tm:
+                    vals_upper = [str(v).upper().strip() for v in filtros.tipo_movimento]
+                    mask = df[col_tm].astype(str).str.upper().str.strip().isin(vals_upper)
+                    df = df[mask]
+
+            # 4. Filtro de Descrição
+            if filtros.descricao_contem:
+                col_desc = find_col(["DESCRICAO", "DESCRIÇÃO", "PRODUTO", "DESC PROD"])
+                if col_desc:
+                    term = filtros.descricao_contem.lower().strip()
+                    mask = df[col_desc].astype(str).str.lower().str.contains(term, na=False)
+                    df = df[mask]
+
 
         return ReadResult(
             df=df,
