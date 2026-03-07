@@ -13,6 +13,7 @@ from typing import List, Optional
 import io
 from datetime import datetime
 import gc
+import shutil
 
 # Import das funções do módulo principal
 from consolidate_relatorio_base import (
@@ -86,7 +87,7 @@ def process_uploaded_files(
     filtros: Optional[FilterConfig] = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, List[ReadResult]]:
     """
-    Processa arquivos enviados pelo usuário.
+    Processa arquivos enviados pelo usuário com tratamento robusto de erros.
     
     Args:
         uploaded_files: Lista de arquivos enviados via file_uploader.
@@ -95,6 +96,7 @@ def process_uploaded_files(
         header_row: Linha de cabeçalho manual (1-based).
         read_as_text: Se True, lê como texto.
         add_audit: Se True, adiciona colunas de auditoria.
+        filtros: Configuração de filtros opcionais.
     
     Returns:
         Tupla (df_consolidado, df_resumo, resultados).
@@ -109,56 +111,61 @@ def process_uploaded_files(
     progress_bar = st.progress(0)
     status_text = st.empty()
     
-    for idx, uploaded_file in enumerate(uploaded_files, start=1):
-        # Salva arquivo temporariamente
-        temp_path = temp_dir / uploaded_file.name
-        with open(temp_path, "wb") as f:
-            f.write(uploaded_file.getbuffer())
-        
-        # Atualiza progresso
-        progress = idx / len(uploaded_files)
-        progress_bar.progress(progress)
-        status_text.text(f"Processando {idx}/{len(uploaded_files)}: {uploaded_file.name}")
-        
-        # Processa arquivo
-        header_0based = None if auto_detect_header else max(0, header_row - 1)
-        
-        r = ler_planilha_robusta(
-            file_path=str(temp_path),
-            preferred_sheet=preferred_sheet,
-            auto_detect_header=auto_detect_header,
-            header_row_0based=header_0based,
-            read_as_text=read_as_text,
-            adicionar_auditoria=add_audit,
-            filtros=filtros,
-        )
-        
-        results.append(r)
-        
-        if r.status == "OK" and r.df is not None:
-            dfs_ok.append(r.df)
-            logger.info(f"✅ {r.arquivo}: {r.linhas} linhas")
-        else:
-            logger.error(f"❌ {r.arquivo}: {r.erro}")
-        
-        # Remove arquivo temporário
-        temp_path.unlink()
+    try:
+        for idx, uploaded_file in enumerate(uploaded_files, start=1):
+            # Salva arquivo temporariamente
+            temp_path = temp_dir / uploaded_file.name
+            try:
+                with open(temp_path, "wb") as f:
+                    f.write(uploaded_file.getbuffer())
+                
+                # Atualiza progresso
+                progress = idx / len(uploaded_files)
+                progress_bar.progress(progress)
+                status_text.text(f"Processando {idx}/{len(uploaded_files)}: {uploaded_file.name}")
+                
+                # Processa arquivo
+                header_0based = None if auto_detect_header else max(0, header_row - 1)
+                
+                r = ler_planilha_robusta(
+                    file_path=str(temp_path),
+                    preferred_sheet=preferred_sheet,
+                    auto_detect_header=auto_detect_header,
+                    header_row_0based=header_0based,
+                    read_as_text=read_as_text,
+                    adicionar_auditoria=add_audit,
+                    filtros=filtros,
+                )
+                
+                results.append(r)
+                
+                if r.status == "OK" and r.df is not None:
+                    dfs_ok.append(r.df)
+                    logger.info(f"✅ {r.arquivo}: {r.linhas} linhas")
+                else:
+                    logger.error(f"❌ {r.arquivo}: {r.erro}")
+            
+            finally:
+                # Remove arquivo temporário após processamento
+                if temp_path.exists():
+                    temp_path.unlink()
     
-    # Remove diretório temporário
-    temp_dir.rmdir()
+    finally:
+        # Garante limpeza de diretório temporário mesmo em caso de erro
+        try:
+            if temp_dir.exists():
+                shutil.rmtree(temp_dir)
+        except Exception as cleanup_error:
+            logger.warning(f"Não foi possível limpar diretório temporário: {cleanup_error}")
     
     # Consolida DataFrames
     df_consolidado = consolidar_planilhas(dfs_ok)
 
-    # -----------------------------
-    # Otimização de Memória (Critical for OOM Fix)
-    # -----------------------------
-    # Libera memória dos DFs originais pois já temos o consolidado
+    # Otimização de Memória
     del dfs_ok
     for r in results:
-        r.df = None  # Remove referência circular/direta
+        r.df = None
     gc.collect()
-    # -----------------------------
     
     # Gera resumo
     df_resumo = pd.DataFrame([
@@ -182,15 +189,22 @@ def process_uploaded_files(
 
 def create_excel_download(df_dados: pd.DataFrame, df_resumo: pd.DataFrame, sheet_name: str) -> bytes:
     """
-    Cria arquivo Excel em memória para download.
-    Usa XlsxWriter com otimização de memória (constant_memory=True).
+    Cria arquivo Excel em memória para download com otimização de memória.
+    
+    Args:
+        df_dados: DataFrame com dados consolidados.
+        df_resumo: DataFrame com resumo da consolidação.
+        sheet_name: Nome da aba de dados.
+    
+    Returns:
+        Bytes do arquivo Excel.
     """
     output = io.BytesIO()
     
     # Força garbage collection antes do processo pesado de escrita
     gc.collect()
     
-    # Usa engine xlsxwriter com modo constant_memory para streaming (reduz drasticamente RAM)
+    # Usa engine xlsxwriter com modo constant_memory para streaming
     with pd.ExcelWriter(
         output,
         engine="xlsxwriter",
@@ -214,27 +228,19 @@ def create_csv_download_br(df: pd.DataFrame) -> str:
     """
     return df.to_csv(
         index=False,
-        sep=';',           # Separador de campo: ponto-e-vírgula
-        decimal=',',       # Separador decimal: vírgula
-        encoding='utf-8-sig'  # BOM para Excel reconhecer UTF-8
+        sep=';',
+        decimal=',',
+        encoding='utf-8-sig'
     )
 
 
-# ========================================
-# Interface Principal
-# ========================================
-
-def main():
-    """Função principal da aplicação Streamlit."""
+def render_sidebar_config() -> tuple[str, bool, int, bool, bool, bool, FilterConfig]:
+    """
+    Renderiza a barra lateral com configurações e retorna os valores.
     
-    init_session_state()
-    
-    # Header
-    st.title("📊 Consolidador de Relatórios Base")
-    st.markdown("**Consolide múltiplas planilhas Excel em um único arquivo formatado**")
-    st.divider()
-    
-    # Sidebar - Configurações
+    Returns:
+        Tupla com (sheet_name, auto_detect, header_row, read_as_text, add_audit, format_output, filtros)
+    """
     with st.sidebar:
         st.header("⚙️ Configurações")
         
@@ -322,7 +328,7 @@ def main():
         st.divider()
         st.markdown("### 📝 Sobre")
         st.markdown("""
-        Versão: **2.0** (Streamlit)
+        Versão: **2.1** (Streamlit - Melhorado)
         
         Funcionalidades:
         - ✅ Detecção automática de cabeçalho
@@ -330,10 +336,20 @@ def main():
         - ✅ Rastreabilidade completa
         - ✅ Formatação profissional
         - ✅ Interface web moderna
+        - ✅ Tratamento robusto de erros
         """)
     
-    # Main content
-    col1, col2 = st.columns([2, 1])
+    return sheet_name, auto_detect, header_row, read_as_text, add_audit, format_output, filtros
+
+
+def render_upload_section() -> List:
+    """
+    Renderiza a seção de upload de arquivos.
+    
+    Returns:
+        Lista de arquivos enviados.
+    """
+    col1, col2 = st.columns([3, 1])
     
     with col1:
         st.subheader("📂 Upload de Arquivos")
@@ -355,12 +371,111 @@ def main():
     
     with col2:
         st.subheader("🚀 Ação")
-        
         process_button = st.button(
-            "🔄 Consolidar Arquivos",
+            "🔄 Consolidar",
             type="primary",
-            disabled=not uploaded_files
+            disabled=not uploaded_files,
+            use_container_width=True
         )
+    
+    return uploaded_files, process_button
+
+
+def render_results_section(sheet_name: str):
+    """
+    Renderiza a seção de resultados com dados consolidados e download.
+    
+    Args:
+        sheet_name: Nome da aba de dados.
+    """
+    if st.session_state.consolidated_df is None:
+        return
+    
+    st.divider()
+    st.subheader("📊 Resultados")
+    
+    tab1, tab2 = st.tabs(["📈 Dados Consolidados", "📋 Resumo"])
+    
+    with tab1:
+        st.dataframe(
+            st.session_state.consolidated_df,
+            height=400,
+            use_container_width=True
+        )
+        
+        # Estatísticas rápidas
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Total de Linhas", f"{len(st.session_state.consolidated_df):,}")
+        with col2:
+            st.metric("Total de Colunas", len(st.session_state.consolidated_df.columns))
+        with col3:
+            memory_mb = st.session_state.consolidated_df.memory_usage(deep=True).sum() / (1024 * 1024)
+            st.metric("Memória", f"{memory_mb:.2f} MB")
+    
+    with tab2:
+        st.dataframe(
+            st.session_state.summary_df,
+            height=400,
+            use_container_width=True
+        )
+    
+    # Download
+    st.divider()
+    st.subheader("💾 Download")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        default_filename = f"consolidado_{timestamp}.xlsx"
+        
+        excel_bytes = create_excel_download(
+            st.session_state.consolidated_df,
+            st.session_state.summary_df,
+            sheet_name
+        )
+        
+        st.download_button(
+            label="📥 Download Excel",
+            data=excel_bytes,
+            file_name=default_filename,
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            type="primary",
+            use_container_width=True
+        )
+    
+    with col2:
+        csv_data = create_csv_download_br(st.session_state.consolidated_df)
+        st.download_button(
+            label="📥 Download CSV (BR)",
+            data=csv_data,
+            file_name=f"consolidado_{timestamp}.csv",
+            mime="text/csv",
+            help="CSV com separador ; e decimal , (padrão brasileiro)",
+            use_container_width=True
+        )
+
+
+# ========================================
+# Interface Principal
+# ========================================
+
+def main():
+    """Função principal da aplicação Streamlit."""
+    
+    init_session_state()
+    
+    # Header
+    st.title("📊 Consolidador de Relatórios Base")
+    st.markdown("**Consolide múltiplas planilhas Excel em um único arquivo formatado**")
+    st.divider()
+    
+    # Sidebar - Configurações
+    sheet_name, auto_detect, header_row, read_as_text, add_audit, format_output, filtros = render_sidebar_config()
+    
+    # Main content
+    uploaded_files, process_button = render_upload_section()
     
     st.divider()
     
@@ -388,12 +503,13 @@ def main():
                 fail_count = sum(r.status != "OK" for r in results)
                 
                 if df_consolidated.empty:
-                    st.error("❌ Nenhum arquivo foi consolidado com sucesso. Verifique o resumo abaixo.")
+                    st.error("❌ Nenhum arquivo foi consolidado com sucesso. Verifique o resumo abaixo para detalhes dos erros.")
                 else:
                     st.success(f"""
                     ✅ **Consolidação concluída!**
                     
-                    - Arquivos processados: {ok_count}/{len(results)}
+                    - Arquivos processados com sucesso: {ok_count}/{len(results)}
+                    - Arquivos com falha: {fail_count}
                     - Linhas consolidadas: {len(df_consolidated):,}
                     - Colunas: {len(df_consolidated.columns)}
                     """)
@@ -402,69 +518,8 @@ def main():
                 st.error(f"❌ Erro durante processamento: {str(e)}")
                 logger.error(f"Erro: {e}", exc_info=True)
     
-    # Resultados
-    if st.session_state.consolidated_df is not None:
-        st.divider()
-        st.subheader("📊 Resultados")
-        
-        tab1, tab2 = st.tabs(["📈 Dados Consolidados", "📋 Resumo"])
-        
-        with tab1:
-            st.dataframe(
-                st.session_state.consolidated_df,
-                height=400
-            )
-            
-            # Estatísticas rápidas
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("Total de Linhas", f"{len(st.session_state.consolidated_df):,}")
-            with col2:
-                st.metric("Total de Colunas", len(st.session_state.consolidated_df.columns))
-            with col3:
-                memory_mb = st.session_state.consolidated_df.memory_usage(deep=True).sum() / (1024 * 1024)
-                st.metric("Memória", f"{memory_mb:.2f} MB")
-        
-        with tab2:
-            st.dataframe(
-                st.session_state.summary_df,
-                height=400
-            )
-        
-        # Download
-        st.divider()
-        st.subheader("💾 Download")
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            default_filename = f"consolidado_{timestamp}.xlsx"
-            
-            excel_bytes = create_excel_download(
-                st.session_state.consolidated_df,
-                st.session_state.summary_df,
-                sheet_name
-            )
-            
-            st.download_button(
-                label="📥 Download Excel Consolidado",
-                data=excel_bytes,
-                file_name=default_filename,
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                type="primary"
-            )
-        
-        with col2:
-            # CSV no padrão brasileiro (separador ; e decimal ,)
-            csv_data = create_csv_download_br(st.session_state.consolidated_df)
-            st.download_button(
-                label="📥 Download CSV (BR)",
-                data=csv_data,
-                file_name=f"consolidado_{timestamp}.csv",
-                mime="text/csv",
-                help="CSV com separador ; e decimal , (padrão brasileiro)"
-            )
+    # Renderiza seção de resultados
+    render_results_section(sheet_name)
 
 
 if __name__ == "__main__":

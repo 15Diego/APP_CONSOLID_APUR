@@ -431,6 +431,23 @@ def ler_planilha_robusta(
 
     arquivo = os.path.basename(file_path)
 
+    # Validação de entradas
+    if not isinstance(file_path, (str, Path)) or not Path(file_path).is_file():
+        return ReadResult(
+            df=None, arquivo=arquivo, aba=None, header_row_0based=None,
+            linhas=0, colunas=0, status="FALHA", erro="Caminho do arquivo inválido ou arquivo não encontrado. Verifique se o arquivo existe e se você tem permissão de leitura."
+        )
+    if not isinstance(preferred_sheet, str) or not preferred_sheet.strip():
+        return ReadResult(
+            df=None, arquivo=arquivo, aba=None, header_row_0based=None,
+            linhas=0, colunas=0, status="FALHA", erro="Nome da aba preferencial não pode ser vazio. Por favor, forneça um nome de aba válido."
+        )
+    if not auto_detect_header and (header_row_0based is None or not isinstance(header_row_0based, int) or header_row_0based < 0):
+        return ReadResult(
+            df=None, arquivo=arquivo, aba=None, header_row_0based=None,
+            linhas=0, colunas=0, status="FALHA", erro="Linha de cabeçalho manual inválida. Deve ser um número inteiro maior ou igual a 0. Por favor, corrija a configuração."
+        )
+
     try:
         # Valida existência do arquivo
         if not os.path.exists(file_path):
@@ -541,7 +558,7 @@ def ler_planilha_robusta(
             linhas=0,
             colunas=0,
             status="FALHA",
-            erro=f"Erro de acesso ao arquivo: {e}",
+            erro=f"Erro de acesso ao arquivo: {e}. Verifique se o arquivo não está aberto em outro programa e se você tem permissão de leitura.",
         )
     except ValueError as e:
         return ReadResult(
@@ -552,7 +569,7 @@ def ler_planilha_robusta(
             linhas=0,
             colunas=0,
             status="FALHA",
-            erro=f"Erro de validação: {e}",
+            erro=f"Erro de validação: {e}. Verifique o formato do arquivo ou as configurações de leitura (aba, cabeçalho).",
         )
     except Exception as e:
         return ReadResult(
@@ -563,7 +580,7 @@ def ler_planilha_robusta(
             linhas=0,
             colunas=0,
             status="FALHA",
-            erro=f"Erro inesperado: {e}",
+            erro=f"Erro inesperado ao processar o arquivo: {e}. Por favor, contate o suporte e forneça o log completo."
         )
 
 
@@ -595,22 +612,10 @@ def _colunas_final(planilhas: List[pd.DataFrame]) -> List[str]:
     if not planilhas:
         return []
 
-    final: List[str] = []
-    seen: set[str] = set()
-
-    def add(c: str) -> None:
-        if c not in seen:
-            seen.add(c)
-            final.append(c)
-
-    for c in planilhas[0].columns:
-        add(c)
-
-    for df in planilhas[1:]:
-        for c in df.columns:
-            add(c)
-
-    return final
+    all_cols = []
+    for df in planilhas:
+        all_cols.extend(df.columns)
+    return list(dict.fromkeys(all_cols))
 
 
 def consolidar_planilhas(planilhas: List[pd.DataFrame]) -> pd.DataFrame:

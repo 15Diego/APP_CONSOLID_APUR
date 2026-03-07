@@ -33,6 +33,12 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
+### Executar Testes Unitários
+
+```bash
+python3 -m unittest discover tests
+```
+
 A aplicação abrirá automaticamente no navegador em `http://localhost:8501`
 
 ## 🎯 Como Usar
@@ -70,11 +76,17 @@ A aplicação abrirá automaticamente no navegador em `http://localhost:8501`
 
 ## 📝 Versões
 
-### v2.0 - Streamlit (Atual)
-- Interface web moderna
-- Upload direto de arquivos
-- Visualização interativa de dados
-- Download instantâneo
+### v2.1 - Streamlit (Melhorado)
+- Interface web moderna e modularizada
+- Upload direto de arquivos com limpeza automática de temporários
+- Visualização interativa de dados e resumo de processamento
+- Download instantâneo em Excel e CSV (padrão BR)
+- Tratamento robusto de erros e validação de entradas
+- Otimização de memória para arquivos grandes
+- Testes unitários incluídos
+
+### v2.0 - Streamlit
+- Interface web inicial com Streamlit
 
 ### v1.0 - Tkinter (Desktop)
 - GUI desktop com Tkinter
