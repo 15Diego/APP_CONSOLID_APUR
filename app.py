@@ -189,7 +189,7 @@ def process_uploaded_files(
 
 def create_excel_download(df_dados: pd.DataFrame, df_resumo: pd.DataFrame, sheet_name: str) -> bytes:
     """
-    Cria arquivo Excel em memória para download com otimização de memória.
+    Cria arquivo Excel em memória para download.
     
     Args:
         df_dados: DataFrame com dados consolidados.
@@ -204,14 +204,24 @@ def create_excel_download(df_dados: pd.DataFrame, df_resumo: pd.DataFrame, sheet
     # Força garbage collection antes do processo pesado de escrita
     gc.collect()
     
-    # Usa engine xlsxwriter com modo constant_memory para streaming
+    # Usa openpyxl (sem constant_memory) para garantir escrita correta de todos os dados
     with pd.ExcelWriter(
         output,
-        engine="xlsxwriter",
-        engine_kwargs={'options': {'constant_memory': True}}
+        engine="openpyxl",
     ) as writer:
         df_dados.to_excel(writer, sheet_name=sheet_name, index=False)
         df_resumo.to_excel(writer, sheet_name="Resumo", index=False)
+        
+        # Aplica formatação básica: congela linha do cabeçalho e ajusta larguras
+        for ws_name in [sheet_name, "Resumo"]:
+            ws = writer.sheets[ws_name]
+            ws.freeze_panes = "A2"
+            for col in ws.columns:
+                max_len = max(
+                    (len(str(cell.value)) if cell.value is not None else 0)
+                    for cell in col
+                )
+                ws.column_dimensions[col[0].column_letter].width = min(max_len + 4, 50)
     
     return output.getvalue()
 
