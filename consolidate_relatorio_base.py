@@ -34,7 +34,7 @@ from openpyxl.worksheet.worksheet import Worksheet
 # ========================================
 
 # Nome padrão da aba
-DEFAULT_SHEET_NAME = "Relatorio Base"
+DEFAULT_SHEET_NAME = "Relatorio_Base"
 
 # Configurações de detecção de cabeçalho
 HEADER_DETECTION_ROWS = 30
