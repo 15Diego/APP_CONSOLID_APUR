@@ -527,15 +527,17 @@ def ler_planilha_robusta(
 
             # 3. Filtro de Tipo de Movimento
             if filtros.tipo_movimento:
-                col_tm = find_col(["TIPO MOVIMENTO", "TP MOVIMENTO", "MOVIMENTO", "TP MOV"])
+                # Prioriza nomes exatos da coluna real nos arquivos (Tp. Mov)
+                col_tm = find_col(["TP. MOV", "TIPO MOV", "TIPO MOVIMENTO", "TP MOV", "TP MOVIMENTO", "MOVIMENTO"])
                 if col_tm:
                     vals_upper = [str(v).upper().strip() for v in filtros.tipo_movimento]
                     mask = df[col_tm].astype(str).str.upper().str.strip().isin(vals_upper)
                     df = df[mask]
 
-            # 4. Filtro de Descrição
+            # 4. Filtro de Descrição do Produto
             if filtros.descricao_contem:
-                col_desc = find_col(["DESCRICAO", "DESCRIÇÃO", "PRODUTO", "DESC PROD"])
+                # Prioriza coluna de descrição (Desc. Produto) antes do código (Produto)
+                col_desc = find_col(["DESC. PRODUTO", "DESC PRODUTO", "DESCRICAO PRODUTO", "DESCRIÇÃO PRODUTO", "DESCRICAO", "DESCRIÇÃO"])
                 if col_desc:
                     term = filtros.descricao_contem.lower().strip()
                     mask = df[col_desc].astype(str).str.lower().str.contains(term, na=False)
