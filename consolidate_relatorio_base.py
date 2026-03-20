@@ -105,6 +105,8 @@ def _canon_text(value: str) -> str:
         ''
     """
     s = "" if value is None else str(value)
+    # Trata underscore como espaço para comparação tolerante (ex: 'Relatorio_base' == 'Relatorio Base')
+    s = s.replace("_", " ")
     s = re.sub(r"\s+", " ", s.strip())
     return s.lower()
 
