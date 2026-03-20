@@ -328,15 +328,19 @@ def render_sidebar_config() -> tuple[str, bool, int, bool, bool, bool, FilterCon
         st.divider()
         st.markdown("### 📝 Sobre")
         st.markdown("""
-        Versão: **2.1** (Streamlit - Melhorado)
-        
-        Funcionalidades:
+        **Versão:** 2.2
+
+        **Funcionalidades:**
         - ✅ Detecção automática de cabeçalho
-        - ✅ Consolidação inteligente
-        - ✅ Rastreabilidade completa
-        - ✅ Formatação profissional
-        - ✅ Interface web moderna
-        - ✅ Tratamento robusto de erros
+        - ✅ Consolidação inteligente de múltiplas planilhas
+        - ✅ Busca de aba tolerante (espaço, underscore, maiúsculas)
+        - ✅ Rastreabilidade completa (arquivo, aba e linha de origem)
+        - ✅ Formatação profissional no Excel (tabelas, filtros, larguras)
+        - ✅ Download em Excel e CSV (padrão brasileiro)
+        - ✅ Filtros de extração: CFOP, TES, Tipo de Movimento e Descrição
+        - ✅ Otimização de memória para arquivos grandes
+        - ✅ Tratamento robusto de erros com mensagens detalhadas
+        - ✅ Interface web moderna e responsiva
         """)
     
     return sheet_name, auto_detect, header_row, read_as_text, add_audit, format_output, filtros
