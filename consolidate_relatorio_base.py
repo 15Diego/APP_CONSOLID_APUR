@@ -49,6 +49,9 @@ COLUMN_PADDING = 2
 WIDTH_SAMPLE_ROWS = 200
 MAX_COLUMN_NAME_LENGTH = 255
 
+# Limite de tamanho para upload web (MB)
+MAX_FILE_SIZE_MB = 100
+
 
 # ========================================
 # Enumerações e Classes de Configuração
@@ -231,40 +234,35 @@ def _looks_numeric(s: str) -> bool:
 def resolve_sheet_name(file_path: str, preferred_sheet: str) -> str:
     """
     Resolve o nome real da aba no arquivo Excel de forma tolerante.
-    
+
+    Usa context manager para garantir fechamento correto do arquivo.
+
     Args:
         file_path: Caminho completo do arquivo Excel.
         preferred_sheet: Nome preferencial da aba (pode ter variações de case/espaços).
-    
+
     Returns:
         Nome real da aba encontrada no arquivo.
-    
+
     Raises:
         ValueError: Se a aba não for encontrada, com lista de abas disponíveis.
-    
-    Examples:
-        >>> resolve_sheet_name("data.xlsx", "relatorio base")
-        'Relatorio Base'
     """
-    xls = pd.ExcelFile(file_path, engine="openpyxl")
-    preferred_canon = _canon_text(preferred_sheet)
+    with pd.ExcelFile(file_path, engine="openpyxl") as xls:
+        preferred_canon = _canon_text(preferred_sheet)
 
-    # match exato primeiro
-    if preferred_sheet in xls.sheet_names:
-        return preferred_sheet
+        if preferred_sheet in xls.sheet_names:
+            return preferred_sheet
 
-    # match tolerante
-    for s in xls.sheet_names:
-        if _canon_text(s) == preferred_canon:
-            return s
+        for s in xls.sheet_names:
+            if _canon_text(s) == preferred_canon:
+                return s
 
-    # Mensagem de erro formatada e informativa
-    raise ValueError(
-        f"Aba '{preferred_sheet}' não encontrada.\n"
-        f"Arquivo: {os.path.basename(file_path)}\n"
-        f"Abas disponíveis:\n" + 
-        "\n".join(f"  • {s}" for s in xls.sheet_names)
-    )
+        raise ValueError(
+            f"Aba '{preferred_sheet}' não encontrada.\n"
+            f"Arquivo: {os.path.basename(file_path)}\n"
+            f"Abas disponíveis:\n"
+            + "\n".join(f"  • {s}" for s in xls.sheet_names)
+        )
 
 
 def detect_header_row(
@@ -300,23 +298,26 @@ def detect_header_row(
     
     best_row = 0
     best_score = -1.0
-    
+
     for i, row in enumerate(ws.iter_rows(max_row=max_rows, values_only=True)):
         filled = [v for v in row if _is_filled_cell(v)]
         if len(filled) < MIN_FILLED_CELLS_FOR_HEADER:
             continue
-        
-        # Calcula score baseado em preenchimento, unicidade e penaliza numéricos
+
         filled_str = [str(v).strip() for v in filled]
         unique_count = len(set(filled_str))
-        numeric_ratio = sum(_looks_numeric(x) for x in filled_str) / len(filled_str) if filled_str else 0
-        
-        score = len(filled) + UNIQUENESS_BONUS * unique_count - NUMERIC_PENALTY_WEIGHT * numeric_ratio
-        
+        numeric_ratio = sum(_looks_numeric(x) for x in filled_str) / len(filled_str)
+        total_cells = len(row) if row else len(filled)
+
+        # Score normalizado (0-1) para ser consistente independente da largura da planilha
+        fill_ratio = len(filled) / total_cells if total_cells > 0 else 0
+        uniqueness_ratio = unique_count / len(filled)
+        score = fill_ratio + UNIQUENESS_BONUS * uniqueness_ratio - NUMERIC_PENALTY_WEIGHT * numeric_ratio
+
         if score > best_score:
             best_score = score
             best_row = i
-    
+
     wb.close()
     return best_row
 
@@ -693,15 +694,14 @@ def _aplicar_formatacao_worksheet(ws: Worksheet, table_name: str) -> None:
     # filtro
     ws.auto_filter.ref = ws.dimensions
 
-    # ajustar larguras (amostra: cabeçalho + primeiras WIDTH_SAMPLE_ROWS linhas)
+    # ajustar larguras — itera por linha (melhor cache locality que por coluna)
     max_row_sample = min(ws.max_row, WIDTH_SAMPLE_ROWS + 1)
-    for col_idx in range(1, ws.max_column + 1):
-        max_len = 0
-        for row_idx in range(1, max_row_sample + 1):
-            v = ws.cell(row=row_idx, column=col_idx).value
-            if v is None:
-                continue
-            max_len = max(max_len, len(str(v)))
+    col_max: Dict[int, int] = {}
+    for row in ws.iter_rows(min_row=1, max_row=max_row_sample, values_only=True):
+        for col_idx, v in enumerate(row, start=1):
+            if v is not None:
+                col_max[col_idx] = max(col_max.get(col_idx, 0), len(str(v)))
+    for col_idx, max_len in col_max.items():
         width = min(max_len + COLUMN_PADDING, MAX_COLUMN_WIDTH)
         ws.column_dimensions[get_column_letter(col_idx)].width = max(MIN_COLUMN_WIDTH, width)
 
@@ -719,8 +719,8 @@ def _aplicar_formatacao_worksheet(ws: Worksheet, table_name: str) -> None:
         )
         table.tableStyleInfo = style
 
-        # evita duplicidade se re-salvar
-        if not any(t.displayName == table_name for t in ws._tables):
+        # usa API pública ws.tables em vez de ws._tables (atributo privado)
+        if table_name not in ws.tables:
             ws.add_table(table)
 
 
@@ -760,6 +760,30 @@ def salvar_excel(
             ws_resumo = wb["Resumo"]
             _aplicar_formatacao_worksheet(ws_dados, table_name="DadosConsolidados")
             _aplicar_formatacao_worksheet(ws_resumo, table_name="ResumoConsolidacao")
+
+
+def criar_excel_em_memoria(
+    df_dados: pd.DataFrame,
+    df_resumo: pd.DataFrame,
+    sheet_name: str = DEFAULT_SHEET_NAME,
+    formatar: bool = True,
+) -> bytes:
+    """
+    Cria arquivo Excel em memória (bytes) para download web, com formatação completa.
+
+    Equivalente a salvar_excel mas retorna bytes ao invés de salvar em disco.
+    Aplica a mesma formatação profissional (tabelas, filtros, larguras).
+    """
+    import io as _io
+    output = _io.BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        df_dados.to_excel(writer, sheet_name=sheet_name, index=False)
+        df_resumo.to_excel(writer, sheet_name="Resumo", index=False)
+        if formatar:
+            wb = writer.book
+            _aplicar_formatacao_worksheet(wb[sheet_name], table_name="DadosConsolidados")
+            _aplicar_formatacao_worksheet(wb["Resumo"], table_name="ResumoConsolidacao")
+    return output.getvalue()
 
 
 # -----------------------------

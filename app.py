@@ -18,9 +18,12 @@ import shutil
 # Import das funções do módulo principal
 from consolidate_relatorio_base import (
     DEFAULT_SHEET_NAME,
+    MAX_FILE_SIZE_MB,
+    AuditColumn,
     ler_planilha_robusta,
     consolidar_planilhas,
     salvar_excel,
+    criar_excel_em_memoria,
     ReadResult,
     FilterConfig,
 )
@@ -65,17 +68,38 @@ logger = setup_logger()
 
 def init_session_state():
     """Inicializa variáveis de estado da sessão."""
-    if "processed_files" not in st.session_state:
-        st.session_state.processed_files = []
-    if "consolidated_df" not in st.session_state:
-        st.session_state.consolidated_df = None
-    if "summary_df" not in st.session_state:
-        st.session_state.summary_df = None
+    defaults = {
+        "processed_files": [],
+        "consolidated_df": None,
+        "summary_df": None,
+        "format_output": True,
+        "sheet_name_used": DEFAULT_SHEET_NAME,
+    }
+    for key, value in defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = value
+
+
+def clear_results() -> None:
+    """Limpa resultados anteriores do session state."""
+    st.session_state.consolidated_df = None
+    st.session_state.summary_df = None
+    st.session_state.processed_files = []
 
 
 # ========================================
 # Funções de Processamento
 # ========================================
+
+def validar_arquivos(uploaded_files: List) -> List[str]:
+    """Valida tamanho dos arquivos — retorna lista de avisos."""
+    avisos = []
+    for f in uploaded_files:
+        size_mb = len(f.getvalue()) / (1024 * 1024)
+        if size_mb > MAX_FILE_SIZE_MB:
+            avisos.append(f"⚠️ **{f.name}** ({size_mb:.1f} MB) excede o limite recomendado de {MAX_FILE_SIZE_MB} MB.")
+    return avisos
+
 
 def process_uploaded_files(
     uploaded_files: List,
@@ -87,77 +111,41 @@ def process_uploaded_files(
     filtros: Optional[FilterConfig] = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, List[ReadResult]]:
     """
-    Processa arquivos enviados pelo usuário com tratamento robusto de erros.
-    
-    Args:
-        uploaded_files: Lista de arquivos enviados via file_uploader.
-        preferred_sheet: Nome da aba a ler.
-        auto_detect_header: Se True, detecta cabeçalho automaticamente.
-        header_row: Linha de cabeçalho manual (1-based).
-        read_as_text: Se True, lê como texto.
-        add_audit: Se True, adiciona colunas de auditoria.
-        filtros: Configuração de filtros opcionais.
-    
-    Returns:
-        Tupla (df_consolidado, df_resumo, resultados).
+    Processa arquivos usando BytesIO — sem escrita em disco.
     """
     results: List[ReadResult] = []
     dfs_ok: List[pd.DataFrame] = []
-    
-    # Cria diretório temporário para processamento
-    temp_dir = Path("temp_uploads")
-    temp_dir.mkdir(exist_ok=True)
-    
+
     progress_bar = st.progress(0)
     status_text = st.empty()
-    
-    try:
-        for idx, uploaded_file in enumerate(uploaded_files, start=1):
-            # Salva arquivo temporariamente
-            temp_path = temp_dir / uploaded_file.name
-            try:
-                with open(temp_path, "wb") as f:
-                    f.write(uploaded_file.getbuffer())
-                
-                # Atualiza progresso
-                progress = idx / len(uploaded_files)
-                progress_bar.progress(progress)
-                status_text.text(f"Processando {idx}/{len(uploaded_files)}: {uploaded_file.name}")
-                
-                # Processa arquivo
-                header_0based = None if auto_detect_header else max(0, header_row - 1)
-                
-                r = ler_planilha_robusta(
-                    file_path=str(temp_path),
-                    preferred_sheet=preferred_sheet,
-                    auto_detect_header=auto_detect_header,
-                    header_row_0based=header_0based,
-                    read_as_text=read_as_text,
-                    adicionar_auditoria=add_audit,
-                    filtros=filtros,
-                )
-                
-                results.append(r)
-                
-                if r.status == "OK" and r.df is not None:
-                    dfs_ok.append(r.df)
-                    logger.info(f"✅ {r.arquivo}: {r.linhas} linhas")
-                else:
-                    logger.error(f"❌ {r.arquivo}: {r.erro}")
-            
-            finally:
-                # Remove arquivo temporário após processamento
-                if temp_path.exists():
-                    temp_path.unlink()
-    
-    finally:
-        # Garante limpeza de diretório temporário mesmo em caso de erro
-        try:
-            if temp_dir.exists():
-                shutil.rmtree(temp_dir)
-        except Exception as cleanup_error:
-            logger.warning(f"Não foi possível limpar diretório temporário: {cleanup_error}")
-    
+    header_0based = None if auto_detect_header else max(0, header_row - 1)
+
+    for idx, uploaded_file in enumerate(uploaded_files, start=1):
+        progress_bar.progress(idx / len(uploaded_files))
+        status_text.text(f"Processando {idx}/{len(uploaded_files)}: {uploaded_file.name}")
+
+        # Passa BytesIO diretamente — sem temp files
+        buffer = io.BytesIO(uploaded_file.getvalue())
+        r = ler_planilha_robusta(
+            file_path=buffer,
+            preferred_sheet=preferred_sheet,
+            auto_detect_header=auto_detect_header,
+            header_row_0based=header_0based,
+            read_as_text=read_as_text,
+            adicionar_auditoria=add_audit,
+            filtros=filtros,
+        )
+
+        results.append(r)
+        if r.status == "OK" and r.df is not None:
+            dfs_ok.append(r.df)
+            logger.info(f"✅ {r.arquivo}: {r.linhas} linhas")
+        else:
+            logger.error(f"❌ {r.arquivo}: {r.erro}")
+
+    progress_bar.empty()
+    status_text.empty()
+
     # Consolida DataFrames
     df_consolidado = consolidar_planilhas(dfs_ok)
 
@@ -336,63 +324,74 @@ def render_sidebar_config() -> tuple[str, bool, int, bool, bool, bool, FilterCon
             )
         
         st.divider()
-        st.markdown("### 📝 Sobre")
-        st.markdown("""
-        **Versão:** 2.2
+        with st.expander("📝 Sobre"):
+            st.markdown("""
+            **Versão:** 2.2
 
-        **Funcionalidades:**
-        - ✅ Detecção automática de cabeçalho
-        - ✅ Consolidação inteligente de múltiplas planilhas
-        - ✅ Busca de aba tolerante (espaço, underscore, maiúsculas)
-        - ✅ Rastreabilidade completa (arquivo, aba e linha de origem)
-        - ✅ Formatação profissional no Excel (tabelas, filtros, larguras)
-        - ✅ Download em Excel e CSV (padrão brasileiro)
-        - ✅ Filtros de extração: CFOP, TES, Tipo de Movimento e Descrição
-        - ✅ Otimização de memória para arquivos grandes
-        - ✅ Tratamento robusto de erros com mensagens detalhadas
-        - ✅ Interface web moderna e responsiva
-        """)
+            **Funcionalidades:**
+            - ✅ Detecção automática de cabeçalho
+            - ✅ Consolidação inteligente de múltiplas planilhas
+            - ✅ Busca de aba tolerante (espaço, underscore, maiúsculas)
+            - ✅ Rastreabilidade completa (arquivo, aba e linha de origem)
+            - ✅ Formatação profissional no Excel (tabelas, filtros, larguras)
+            - ✅ Download em Excel e CSV (padrão brasileiro)
+            - ✅ Filtros de extração: CFOP, TES, Tipo de Movimento e Descrição
+            - ✅ Otimização de memória para arquivos grandes
+            - ✅ Tratamento robusto de erros com mensagens detalhadas
+            - ✅ Interface web moderna e responsiva
+            """)
     
     return sheet_name, auto_detect, header_row, read_as_text, add_audit, format_output, filtros
 
 
-def render_upload_section() -> List:
+def render_upload_section() -> tuple[List, bool, bool]:
     """
     Renderiza a seção de upload de arquivos.
-    
+
     Returns:
-        Lista de arquivos enviados.
+        Tupla com (uploaded_files, process_button, clear_button)
     """
-    col1, col2 = st.columns([3, 1])
-    
+    st.subheader("📂 Upload de Arquivos")
+    uploaded_files = st.file_uploader(
+        "Selecione os arquivos Excel (.xlsx) para consolidar",
+        type=["xlsx"],
+        accept_multiple_files=True,
+        help="Carregue múltiplos arquivos Excel para consolidação"
+    )
+
+    if uploaded_files:
+        st.success(f"✅ {len(uploaded_files)} arquivo(s) selecionado(s)")
+
+        # Preview dos arquivos
+        with st.expander("👁️ Visualizar arquivos selecionados"):
+            for f in uploaded_files:
+                file_size_mb = len(f.getvalue()) / (1024 * 1024)
+                st.text(f"• {f.name} ({file_size_mb:.2f} MB)")
+
+        # Validação de tamanho dos arquivos
+        avisos = validar_arquivos(uploaded_files)
+        if avisos:
+            for aviso in avisos:
+                st.warning(aviso)
+
+    # Botões de ação abaixo da seção de upload
+    col1, col2 = st.columns(2)
+
     with col1:
-        st.subheader("📂 Upload de Arquivos")
-        uploaded_files = st.file_uploader(
-            "Selecione os arquivos Excel (.xlsx) para consolidar",
-            type=["xlsx"],
-            accept_multiple_files=True,
-            help="Carregue múltiplos arquivos Excel para consolidação"
-        )
-        
-        if uploaded_files:
-            st.success(f"✅ {len(uploaded_files)} arquivo(s) selecionado(s)")
-            
-            # Preview dos arquivos
-            with st.expander("👁️ Visualizar arquivos selecionados"):
-                for f in uploaded_files:
-                    file_size_mb = len(f.getvalue()) / (1024 * 1024)
-                    st.text(f"• {f.name} ({file_size_mb:.2f} MB)")
-    
-    with col2:
-        st.subheader("🚀 Ação")
         process_button = st.button(
             "🔄 Consolidar",
             type="primary",
             disabled=not uploaded_files,
             use_container_width=True
         )
-    
-    return uploaded_files, process_button
+
+    with col2:
+        clear_button = st.button(
+            "🗑️ Limpar",
+            use_container_width=True
+        )
+
+    return uploaded_files, process_button, clear_button
 
 
 def render_results_section(sheet_name: str):
@@ -411,20 +410,34 @@ def render_results_section(sheet_name: str):
     tab1, tab2 = st.tabs(["📈 Dados Consolidados", "📋 Resumo"])
     
     with tab1:
+        # Preparar column_config para destacar colunas de auditoria
+        df = st.session_state.consolidated_df
+        column_config = {}
+
+        # Destacar colunas de auditoria com background
+        for col in df.columns:
+            if col in ["arquivo_origem", "linha_origem", "aba_origem"]:
+                column_config[col] = st.column_config.Column(
+                    label=col,
+                    help="Coluna de auditoria",
+                    width="medium"
+                )
+
         st.dataframe(
-            st.session_state.consolidated_df,
+            df,
             height=400,
-            use_container_width=True
+            use_container_width=True,
+            column_config=column_config if column_config else None
         )
-        
+
         # Estatísticas rápidas
         col1, col2, col3 = st.columns(3)
         with col1:
-            st.metric("Total de Linhas", f"{len(st.session_state.consolidated_df):,}")
+            st.metric("Total de Linhas", f"{len(df):,}")
         with col2:
-            st.metric("Total de Colunas", len(st.session_state.consolidated_df.columns))
+            st.metric("Total de Colunas", len(df.columns))
         with col3:
-            memory_mb = st.session_state.consolidated_df.memory_usage(deep=True).sum() / (1024 * 1024)
+            memory_mb = df.memory_usage(deep=True).sum() / (1024 * 1024)
             st.metric("Memória", f"{memory_mb:.2f} MB")
     
     with tab2:
@@ -489,10 +502,15 @@ def main():
     sheet_name, auto_detect, header_row, read_as_text, add_audit, format_output, filtros = render_sidebar_config()
     
     # Main content
-    uploaded_files, process_button = render_upload_section()
-    
+    uploaded_files, process_button, clear_button = render_upload_section()
+
+    # Limpar resultados quando botão é clicado
+    if clear_button:
+        clear_results()
+        st.rerun()
+
     st.divider()
-    
+
     # Processamento
     if process_button and uploaded_files:
         with st.spinner("Processando arquivos..."):
@@ -506,28 +524,36 @@ def main():
                     add_audit=add_audit,
                     filtros=filtros,
                 )
-                
+
                 # Salva em session state
                 st.session_state.consolidated_df = df_consolidated
                 st.session_state.summary_df = df_summary
                 st.session_state.processed_files = results
-                
+
                 # Estatísticas
                 ok_count = sum(r.status == "OK" for r in results)
                 fail_count = sum(r.status != "OK" for r in results)
-                
+
                 if df_consolidated.empty:
                     st.error("❌ Nenhum arquivo foi consolidado com sucesso. Verifique o resumo abaixo para detalhes dos erros.")
                 else:
                     st.success(f"""
                     ✅ **Consolidação concluída!**
-                    
+
                     - Arquivos processados com sucesso: {ok_count}/{len(results)}
                     - Arquivos com falha: {fail_count}
                     - Linhas consolidadas: {len(df_consolidated):,}
                     - Colunas: {len(df_consolidated.columns)}
                     """)
-                
+
+                # Aviso imediato se houver falhas
+                if fail_count > 0:
+                    st.warning(f"""
+                    ⚠️ **{fail_count} arquivo(s) tiveram erro(s) durante processamento.**
+
+                    Verifique a aba "Resumo" abaixo para detalhes sobre quais arquivos falharam e por quê.
+                    """)
+
             except Exception as e:
                 st.error(f"❌ Erro durante processamento: {str(e)}")
                 logger.error(f"Erro: {e}", exc_info=True)
