@@ -257,9 +257,10 @@ def resolve_sheet_name(file_path: str, preferred_sheet: str) -> str:
             if _canon_text(s) == preferred_canon:
                 return s
 
+        nome = os.path.basename(str(file_path)) if isinstance(file_path, (str, Path)) else "(BytesIO)"
         raise ValueError(
             f"Aba '{preferred_sheet}' não encontrada.\n"
-            f"Arquivo: {os.path.basename(file_path)}\n"
+            f"Arquivo: {nome}\n"
             f"Abas disponíveis:\n"
             + "\n".join(f"  • {s}" for s in xls.sheet_names)
         )
@@ -400,27 +401,30 @@ def _clean_dataframe(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def ler_planilha_robusta(
-    file_path: str,
+    file_path,
     preferred_sheet: str,
     auto_detect_header: bool = True,
     header_row_0based: Optional[int] = None,
     read_as_text: bool = True,
     adicionar_auditoria: bool = True,
     filtros: Optional[FilterConfig] = None,
+    nome_arquivo: Optional[str] = None,
 ) -> ReadResult:
     """
     Lê uma planilha Excel e retorna DataFrame + metadados.
     
-    Esta função não aborta o processo inteiro em caso de erro, retornando
+    Aceita caminho de arquivo (str/Path) ou objeto BytesIO.
+    Não aborta o processo inteiro em caso de erro, retornando
     um ReadResult com status="FALHA" para permitir consolidação parcial.
     
     Args:
-        file_path: Caminho completo do arquivo Excel.
+        file_path: Caminho do arquivo Excel (str/Path) ou objeto BytesIO.
         preferred_sheet: Nome da aba a ler (com tolerância a case/espaços).
         auto_detect_header: Se True, detecta automaticamente a linha de cabeçalho.
         header_row_0based: Índice (0-based) manual do cabeçalho. Ignorado se auto_detect_header=True.
         read_as_text: Se True, lê todas as células como texto (preserva zeros à esquerda).
         adicionar_auditoria: Se True, adiciona colunas de rastreabilidade (arquivo, aba, linha).
+        nome_arquivo: Nome do arquivo para exibir nos metadados (obrigatório quando file_path é BytesIO).
     
     Returns:
         ReadResult com DataFrame e metadados da leitura. Status "OK" ou "FALHA".
@@ -432,11 +436,17 @@ def ler_planilha_robusta(
         >>> r.df.shape
         (100, 15)
     """
+    import io as _io
 
-    arquivo = os.path.basename(file_path)
+    # Determina o nome do arquivo para metadados
+    is_bytesio = isinstance(file_path, _io.BytesIO)
+    if is_bytesio:
+        arquivo = nome_arquivo or "arquivo_desconhecido.xlsx"
+    else:
+        arquivo = os.path.basename(str(file_path))
 
     # Validação de entradas
-    if not isinstance(file_path, (str, Path)) or not Path(file_path).is_file():
+    if not is_bytesio and (not isinstance(file_path, (str, Path)) or not Path(file_path).is_file()):
         return ReadResult(
             df=None, arquivo=arquivo, aba=None, header_row_0based=None,
             linhas=0, colunas=0, status="FALHA", erro="Caminho do arquivo inválido ou arquivo não encontrado. Verifique se o arquivo existe e se você tem permissão de leitura."
@@ -453,18 +463,25 @@ def ler_planilha_robusta(
         )
 
     try:
-        # Valida existência do arquivo
-        if not os.path.exists(file_path):
+        # Valida existência do arquivo (apenas para caminhos, não para BytesIO)
+        if not is_bytesio and not os.path.exists(file_path):
             raise FileNotFoundError(f"Arquivo não encontrado: {file_path}")
         
+        # Para BytesIO: garante que o ponteiro está no início antes de cada operação
+        if is_bytesio:
+            file_path.seek(0)
         aba_real = resolve_sheet_name(file_path, preferred_sheet)
 
         if header_row_0based is None:
+            if is_bytesio:
+                file_path.seek(0)
             header = detect_header_row(file_path, aba_real) if auto_detect_header else 1
         else:
             header = header_row_0based
 
         dtype_arg = "string" if read_as_text else None
+        if is_bytesio:
+            file_path.seek(0)
         try:
             df = pd.read_excel(
                 file_path,
@@ -475,6 +492,8 @@ def ler_planilha_robusta(
             )
         except TypeError:
             # pandas sem suporte a dtype="string" em read_excel
+            if is_bytesio:
+                file_path.seek(0)
             df = pd.read_excel(
                 file_path,
                 sheet_name=aba_real,

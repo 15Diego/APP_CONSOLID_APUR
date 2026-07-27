@@ -124,7 +124,7 @@ def process_uploaded_files(
         progress_bar.progress(idx / len(uploaded_files))
         status_text.text(f"Processando {idx}/{len(uploaded_files)}: {uploaded_file.name}")
 
-        # Passa BytesIO diretamente — sem temp files
+        # Passa BytesIO diretamente — sem escrita em disco
         buffer = io.BytesIO(uploaded_file.getvalue())
         r = ler_planilha_robusta(
             file_path=buffer,
@@ -134,6 +134,7 @@ def process_uploaded_files(
             read_as_text=read_as_text,
             adicionar_auditoria=add_audit,
             filtros=filtros,
+            nome_arquivo=uploaded_file.name,
         )
 
         results.append(r)
@@ -546,16 +547,25 @@ def main():
                     - Colunas: {len(df_consolidated.columns)}
                     """)
 
-                # Aviso imediato se houver falhas
+                # Exibe erros detalhados por arquivo imediatamente
                 if fail_count > 0:
-                    st.warning(f"""
-                    ⚠️ **{fail_count} arquivo(s) tiveram erro(s) durante processamento.**
-
-                    Verifique a aba "Resumo" abaixo para detalhes sobre quais arquivos falharam e por quê.
-                    """)
+                    with st.expander(f"⚠️ {fail_count} arquivo(s) com erro — clique para ver detalhes", expanded=True):
+                        for r in results:
+                            if r.status != "OK":
+                                st.error(
+                                    f"📄 **{r.arquivo}**\n\n"
+                                    f"{r.erro or 'Erro desconhecido.'}"
+                                )
 
             except Exception as e:
-                st.error(f"❌ Erro durante processamento: {str(e)}")
+                import traceback
+                st.error(
+                    f"❌ **Erro inesperado durante o processamento**\n\n"
+                    f"**Tipo:** `{type(e).__name__}`\n\n"
+                    f"**Mensagem:** {str(e)}"
+                )
+                with st.expander("🔍 Ver detalhes técnicos do erro"):
+                    st.code(traceback.format_exc(), language="python")
                 logger.error(f"Erro: {e}", exc_info=True)
     
     # Renderiza seção de resultados
