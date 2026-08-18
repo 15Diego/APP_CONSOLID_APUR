@@ -6,7 +6,9 @@ from consolidate_relatorio_base import (
     _normalize_column_name,
     _make_unique,
     _is_filled_cell,
-    _looks_numeric
+    _looks_numeric,
+    selecionar_engine_excel,
+    SUPPORTED_EXCEL_EXTENSIONS,
 )
 
 class TestUtils(unittest.TestCase):
@@ -45,6 +47,29 @@ class TestUtils(unittest.TestCase):
         self.assertFalse(_looks_numeric("abc"))
         self.assertFalse(_looks_numeric("12.34.56"))
         self.assertFalse(_looks_numeric(None))
+
+    def test_selecionar_engine_excel(self):
+        casos = {
+            "relatorio.xlsx": "openpyxl",
+            "relatorio.XLSM": "openpyxl",
+            "modelo.xltx": "openpyxl",
+            "modelo.xltm": "openpyxl",
+            "legado.xls": "xlrd",
+            "binario.xlsb": "pyxlsb",
+        }
+        for arquivo, engine_esperada in casos.items():
+            with self.subTest(arquivo=arquivo):
+                self.assertEqual(selecionar_engine_excel(arquivo), engine_esperada)
+
+    def test_formato_excel_nao_suportado(self):
+        with self.assertRaisesRegex(ValueError, "Formato '.csv' não suportado"):
+            selecionar_engine_excel("relatorio.csv")
+
+    def test_lista_de_formatos_suportados(self):
+        self.assertEqual(
+            set(SUPPORTED_EXCEL_EXTENSIONS),
+            {".xlsx", ".xlsm", ".xltx", ".xltm", ".xls", ".xlsb"},
+        )
 
 if __name__ == "__main__":
     unittest.main()

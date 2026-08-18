@@ -7,7 +7,7 @@ Aplicação web moderna para consolidação de múltiplas planilhas Excel em um 
 
 ## ✨ Funcionalidades
 
-- 📤 **Upload múltiplo** de arquivos Excel (.xlsx)
+- 📤 **Upload múltiplo** de arquivos Excel: `.xlsx`, `.xlsm`, `.xltx`, `.xltm`, `.xls` e `.xlsb`
 - 🔍 **Detecção automática** de cabeçalhos
 - 📊 **Consolidação inteligente** com alinhamento de colunas
 - 🔗 **Rastreabilidade** completa (origem e linha de cada registro)
@@ -48,9 +48,10 @@ A aplicação abrirá automaticamente no navegador em `http://localhost:8501`
    - Detecção automática de cabeçalho (ou manual)
    - Opções avançadas (texto, auditoria, formatação)
 
-2. **Selecione os arquivos** Excel para consolidar
+2. **Selecione os arquivos** Excel para consolidar. São aceitos `.xlsx`, `.xlsm`, `.xltx`, `.xltm`, `.xls` e `.xlsb`.
+   - Arquivos `.xlsm` e `.xltm` são lidos apenas como dados; macros não são executadas nem copiadas para o relatório consolidado.
 
-3private. **Clique em "Consolidar Arquivos"**
+3. **Clique em "Consolidar"**
 
 4. **Visualize os resultados** nas abas:
    - Dados consolidados
@@ -72,9 +73,17 @@ A aplicação abrirá automaticamente no navegador em `http://localhost:8501`
 
 - **[Streamlit](https://streamlit.io)** - Framework web moderno para Python
 - **[pandas](https://pandas.pydata.org/)** - Manipulação de dados
-- **[openpyxl](https://openpyxl.readthedocs.io/)** - Leitura/escrita de Excel
+- **[openpyxl](https://openpyxl.readthedocs.io/)** - Leitura de `.xlsx`, `.xlsm`, `.xltx` e `.xltm`, além da escrita do relatório consolidado
+- **[xlrd](https://xlrd.readthedocs.io/)** - Leitura de arquivos legados `.xls`
+- **[pyxlsb](https://github.com/willtrnr/pyxlsb)** - Leitura de arquivos binários `.xlsb`
 
 ## 📝 Versões
+
+### v2.3 - Formatos Excel ampliados
+- Suporte a `.xlsx`, `.xlsm`, `.xltx`, `.xltm`, `.xls` e `.xlsb`
+- Seleção automática da engine de leitura adequada a cada extensão
+- Mensagens de erro específicas para formato inválido, arquivo corrompido e dependência ausente
+- Suporte equivalente na interface web e na interface desktop
 
 ### v2.1 - Streamlit (Melhorado)
 - Interface web moderna e modularizada

@@ -52,6 +52,22 @@ MAX_COLUMN_NAME_LENGTH = 255
 # Limite de tamanho para upload web (MB)
 MAX_FILE_SIZE_MB = 100
 
+# Formatos Microsoft Excel aceitos e respectivas engines do pandas.
+# - openpyxl: arquivos OOXML modernos e modelos do Excel
+# - xlrd: arquivos legados .xls (Excel 97–2003)
+# - pyxlsb: arquivos binários .xlsb
+EXCEL_ENGINES = {
+    ".xlsx": "openpyxl",
+    ".xlsm": "openpyxl",
+    ".xltx": "openpyxl",
+    ".xltm": "openpyxl",
+    ".xls": "xlrd",
+    ".xlsb": "pyxlsb",
+}
+SUPPORTED_EXCEL_EXTENSIONS = tuple(EXCEL_ENGINES)
+SUPPORTED_EXCEL_EXTENSIONS_LABEL = ", ".join(SUPPORTED_EXCEL_EXTENSIONS)
+EXCEL_FILE_DIALOG_PATTERN = " ".join(f"*{ext}" for ext in SUPPORTED_EXCEL_EXTENSIONS)
+
 
 # ========================================
 # Enumerações e Classes de Configuração
@@ -231,86 +247,81 @@ def _looks_numeric(s: str) -> bool:
 # Leitura robusta do Excel
 # -----------------------------
 
-def resolve_sheet_name(file_path: str, preferred_sheet: str) -> str:
-    """
-    Resolve o nome real da aba no arquivo Excel de forma tolerante.
+def selecionar_engine_excel(nome_arquivo: str) -> str:
+    """Retorna a engine pandas adequada para a extensão de um arquivo Excel."""
+    extensao = Path(nome_arquivo).suffix.lower()
+    engine = EXCEL_ENGINES.get(extensao)
+    if engine is None:
+        raise ValueError(
+            f"Formato '{extensao or 'sem extensão'}' não suportado. "
+            f"Envie um arquivo Excel em um destes formatos: {SUPPORTED_EXCEL_EXTENSIONS_LABEL}."
+        )
+    return engine
 
-    Usa context manager para garantir fechamento correto do arquivo.
 
-    Args:
-        file_path: Caminho completo do arquivo Excel.
-        preferred_sheet: Nome preferencial da aba (pode ter variações de case/espaços).
+def _reiniciar_arquivo(file_path: Any) -> None:
+    """Reposiciona um arquivo em memória no início, quando aplicável."""
+    if hasattr(file_path, "seek"):
+        file_path.seek(0)
 
-    Returns:
-        Nome real da aba encontrada no arquivo.
 
-    Raises:
-        ValueError: Se a aba não for encontrada, com lista de abas disponíveis.
-    """
-    with pd.ExcelFile(file_path, engine="openpyxl") as xls:
+def resolve_sheet_name(
+    file_path: Any,
+    preferred_sheet: str,
+    engine: str,
+    nome_arquivo: Optional[str] = None,
+) -> str:
+    """Resolve o nome real da aba de forma tolerante para qualquer formato suportado."""
+    _reiniciar_arquivo(file_path)
+    with pd.ExcelFile(file_path, engine=engine) as xls:
         preferred_canon = _canon_text(preferred_sheet)
 
         if preferred_sheet in xls.sheet_names:
             return preferred_sheet
 
-        for s in xls.sheet_names:
-            if _canon_text(s) == preferred_canon:
-                return s
+        for sheet in xls.sheet_names:
+            if _canon_text(sheet) == preferred_canon:
+                return sheet
 
-        nome = os.path.basename(str(file_path)) if isinstance(file_path, (str, Path)) else "(BytesIO)"
+        nome = nome_arquivo or (
+            os.path.basename(str(file_path)) if isinstance(file_path, (str, Path)) else "arquivo em memória"
+        )
         raise ValueError(
             f"Aba '{preferred_sheet}' não encontrada.\n"
             f"Arquivo: {nome}\n"
             f"Abas disponíveis:\n"
-            + "\n".join(f"  • {s}" for s in xls.sheet_names)
+            + "\n".join(f"  • {sheet}" for sheet in xls.sheet_names)
         )
 
 
 def detect_header_row(
-    file_path: str,
+    file_path: Any,
     sheet_name: str,
+    engine: str,
     max_rows: int = HEADER_DETECTION_ROWS,
 ) -> int:
-    """
-    Detecta a linha (0-based) do cabeçalho usando openpyxl direto.
-    
-    Esta versão é mais eficiente que carregar um DataFrame completo,
-    pois lê apenas as linhas necessárias para detecção.
-    
-    O algoritmo analisa as primeiras linhas buscando por:
-    - Maior número de células preenchidas
-    - Maior unicidade de valores (colunas com nomes únicos)
-    - Penaliza linhas muito numéricas (provavelmente dados, não cabeçalho)
-    
-    Args:
-        file_path: Caminho completo do arquivo Excel.
-        sheet_name: Nome da aba a analisar.
-        max_rows: Número máximo de linhas a analisar (padrão: HEADER_DETECTION_ROWS).
-    
-    Returns:
-        Índice (0-based) da linha que provavelmente contém o cabeçalho.
-    
-    Examples:
-        >>> detect_header_row("data.xlsx", "Sheet1")
-        1  # Segunda linha do Excel (1-based = 2)
-    """
-    wb = load_workbook(file_path, read_only=True, data_only=True)
-    ws = wb[sheet_name]
-    
+    """Detecta a linha de cabeçalho nos primeiros registros de qualquer formato suportado."""
+    _reiniciar_arquivo(file_path)
+    preview = pd.read_excel(
+        file_path,
+        sheet_name=sheet_name,
+        header=None,
+        nrows=max_rows,
+        engine=engine,
+    )
+
     best_row = 0
     best_score = -1.0
-
-    for i, row in enumerate(ws.iter_rows(max_row=max_rows, values_only=True)):
-        filled = [v for v in row if _is_filled_cell(v)]
+    for i, (_, row) in enumerate(preview.iterrows()):
+        valores = row.tolist()
+        filled = [valor for valor in valores if _is_filled_cell(valor)]
         if len(filled) < MIN_FILLED_CELLS_FOR_HEADER:
             continue
 
-        filled_str = [str(v).strip() for v in filled]
+        filled_str = [str(valor).strip() for valor in filled]
         unique_count = len(set(filled_str))
-        numeric_ratio = sum(_looks_numeric(x) for x in filled_str) / len(filled_str)
-        total_cells = len(row) if row else len(filled)
-
-        # Score normalizado (0-1) para ser consistente independente da largura da planilha
+        numeric_ratio = sum(_looks_numeric(valor) for valor in filled_str) / len(filled_str)
+        total_cells = len(valores) if valores else len(filled)
         fill_ratio = len(filled) / total_cells if total_cells > 0 else 0
         uniqueness_ratio = unique_count / len(filled)
         score = fill_ratio + UNIQUENESS_BONUS * uniqueness_ratio - NUMERIC_PENALTY_WEIGHT * numeric_ratio
@@ -319,7 +330,6 @@ def detect_header_row(
             best_score = score
             best_row = i
 
-    wb.close()
     return best_row
 
 
@@ -462,43 +472,47 @@ def ler_planilha_robusta(
             linhas=0, colunas=0, status="FALHA", erro="Linha de cabeçalho manual inválida. Deve ser um número inteiro maior ou igual a 0. Por favor, corrija a configuração."
         )
 
+    engine: Optional[str] = None
     try:
         # Valida existência do arquivo (apenas para caminhos, não para BytesIO)
         if not is_bytesio and not os.path.exists(file_path):
             raise FileNotFoundError(f"Arquivo não encontrado: {file_path}")
-        
-        # Para BytesIO: garante que o ponteiro está no início antes de cada operação
-        if is_bytesio:
-            file_path.seek(0)
-        aba_real = resolve_sheet_name(file_path, preferred_sheet)
+
+        # Seleciona a engine a partir da extensão do arquivo informado pelo usuário.
+        engine = selecionar_engine_excel(arquivo)
+        aba_real = resolve_sheet_name(
+            file_path=file_path,
+            preferred_sheet=preferred_sheet,
+            engine=engine,
+            nome_arquivo=arquivo,
+        )
 
         if header_row_0based is None:
-            if is_bytesio:
-                file_path.seek(0)
-            header = detect_header_row(file_path, aba_real) if auto_detect_header else 1
+            header = (
+                detect_header_row(file_path, aba_real, engine=engine)
+                if auto_detect_header else 1
+            )
         else:
             header = header_row_0based
 
         dtype_arg = "string" if read_as_text else None
-        if is_bytesio:
-            file_path.seek(0)
+        _reiniciar_arquivo(file_path)
         try:
             df = pd.read_excel(
                 file_path,
                 sheet_name=aba_real,
                 header=header,
-                engine="openpyxl",
+                engine=engine,
                 dtype=dtype_arg,
             )
         except TypeError:
-            # pandas sem suporte a dtype="string" em read_excel
-            if is_bytesio:
-                file_path.seek(0)
+            # Compatibilidade com versões de pandas sem suporte a dtype="string".
+            _reiniciar_arquivo(file_path)
             df = pd.read_excel(
                 file_path,
                 sheet_name=aba_real,
                 header=header,
-                engine="openpyxl",
+                engine=engine,
                 dtype=str if read_as_text else None,
             )
 
@@ -585,6 +599,22 @@ def ler_planilha_robusta(
             status="FALHA",
             erro=f"Erro de acesso ao arquivo: {e}. Verifique se o arquivo não está aberto em outro programa e se você tem permissão de leitura.",
         )
+    except ImportError as e:
+        extensao = Path(arquivo).suffix.lower()
+        return ReadResult(
+            df=None,
+            arquivo=arquivo,
+            aba=None,
+            header_row_0based=None,
+            linhas=0,
+            colunas=0,
+            status="FALHA",
+            erro=(
+                f"Não foi possível habilitar a leitura de '{extensao}'. "
+                f"A dependência necessária para este formato não está disponível. "
+                f"Detalhe técnico: {type(e).__name__}: {e}"
+            ),
+        )
     except ValueError as e:
         return ReadResult(
             df=None,
@@ -594,9 +624,10 @@ def ler_planilha_robusta(
             linhas=0,
             colunas=0,
             status="FALHA",
-            erro=f"Erro de validação: {e}. Verifique o formato do arquivo ou as configurações de leitura (aba, cabeçalho).",
+            erro=f"Erro de validação: {e}",
         )
     except Exception as e:
+        extensao = Path(arquivo).suffix.lower() or "sem extensão"
         return ReadResult(
             df=None,
             arquivo=arquivo,
@@ -605,7 +636,11 @@ def ler_planilha_robusta(
             linhas=0,
             colunas=0,
             status="FALHA",
-            erro=f"Erro inesperado ao processar o arquivo: {e}. Por favor, contate o suporte e forneça o log completo."
+            erro=(
+                f"Não foi possível ler o arquivo no formato '{extensao}'. "
+                f"Confirme se o arquivo não está corrompido, se a extensão corresponde ao conteúdo "
+                f"e se a aba configurada existe. Detalhe técnico: {type(e).__name__}: {e}"
+            )
         )
 
 
@@ -986,7 +1021,7 @@ class App(AppBase):
         frm_btn = ttk.Frame(self, padding=10)
         frm_btn.pack(fill="x")
 
-        self.btn_select = ttk.Button(frm_btn, text="Selecionar arquivos (.xlsx)", command=self._select_files)
+        self.btn_select = ttk.Button(frm_btn, text="Selecionar arquivos Excel", command=self._select_files)
         self.btn_select.pack(side="left")
 
         self.btn_run = ttk.Button(frm_btn, text="Consolidar e salvar", command=self._run)
@@ -1023,7 +1058,7 @@ class App(AppBase):
         """Abre diálogo para seleção de arquivos Excel."""
         paths = filedialog.askopenfilenames(
             title="Selecione as planilhas mensais a consolidar",
-            filetypes=[("Arquivos Excel", "*.xlsx")],
+            filetypes=[("Arquivos Excel suportados", EXCEL_FILE_DIALOG_PATTERN)],
         )
         if not paths:
             return
@@ -1186,7 +1221,7 @@ class App(AppBase):
         arquivos sem bloquear interface, e exibe resultado ao usuário.
         """
         if not self.selected_files:
-            messagebox.showwarning("Atenção", "Selecione ao menos um arquivo .xlsx.")
+            messagebox.showwarning("Atenção", "Selecione ao menos um arquivo Excel para consolidar.")
             return
 
         output_path = filedialog.asksaveasfilename(

@@ -19,6 +19,8 @@ import shutil
 from consolidate_relatorio_base import (
     DEFAULT_SHEET_NAME,
     MAX_FILE_SIZE_MB,
+    SUPPORTED_EXCEL_EXTENSIONS,
+    SUPPORTED_EXCEL_EXTENSIONS_LABEL,
     AuditColumn,
     ler_planilha_robusta,
     consolidar_planilhas,
@@ -92,12 +94,23 @@ def clear_results() -> None:
 # ========================================
 
 def validar_arquivos(uploaded_files: List) -> List[str]:
-    """Valida tamanho dos arquivos — retorna lista de avisos."""
+    """Valida extensão e tamanho dos arquivos enviados."""
     avisos = []
-    for f in uploaded_files:
-        size_mb = len(f.getvalue()) / (1024 * 1024)
+    for arquivo in uploaded_files:
+        extensao = Path(arquivo.name).suffix.lower()
+        if extensao not in SUPPORTED_EXCEL_EXTENSIONS:
+            avisos.append(
+                f"❌ **{arquivo.name}** possui formato não suportado. "
+                f"Formatos aceitos: {SUPPORTED_EXCEL_EXTENSIONS_LABEL}."
+            )
+            continue
+
+        size_mb = len(arquivo.getvalue()) / (1024 * 1024)
         if size_mb > MAX_FILE_SIZE_MB:
-            avisos.append(f"⚠️ **{f.name}** ({size_mb:.1f} MB) excede o limite recomendado de {MAX_FILE_SIZE_MB} MB.")
+            avisos.append(
+                f"⚠️ **{arquivo.name}** ({size_mb:.1f} MB) excede o limite recomendado de "
+                f"{MAX_FILE_SIZE_MB} MB; o processamento pode demorar mais."
+            )
     return avisos
 
 
@@ -327,7 +340,7 @@ def render_sidebar_config() -> tuple[str, bool, int, bool, bool, bool, FilterCon
         st.divider()
         with st.expander("📝 Sobre"):
             st.markdown("""
-            **Versão:** 2.2
+            **Versão:** 2.3
 
             **Funcionalidades:**
             - ✅ Detecção automática de cabeçalho
@@ -335,6 +348,7 @@ def render_sidebar_config() -> tuple[str, bool, int, bool, bool, bool, FilterCon
             - ✅ Busca de aba tolerante (espaço, underscore, maiúsculas)
             - ✅ Rastreabilidade completa (arquivo, aba e linha de origem)
             - ✅ Formatação profissional no Excel (tabelas, filtros, larguras)
+            - ✅ Upload de arquivos Excel: XLSX, XLSM, XLTX, XLTM, XLS e XLSB
             - ✅ Download em Excel e CSV (padrão brasileiro)
             - ✅ Filtros de extração: CFOP, TES, Tipo de Movimento e Descrição
             - ✅ Otimização de memória para arquivos grandes
@@ -354,10 +368,13 @@ def render_upload_section() -> tuple[List, bool, bool]:
     """
     st.subheader("📂 Upload de Arquivos")
     uploaded_files = st.file_uploader(
-        "Selecione os arquivos Excel (.xlsx) para consolidar",
-        type=["xlsx"],
+        "Selecione os arquivos Excel para consolidar",
+        type=[ext.lstrip(".") for ext in SUPPORTED_EXCEL_EXTENSIONS],
         accept_multiple_files=True,
-        help="Carregue múltiplos arquivos Excel para consolidação"
+        help=(
+            "Formatos aceitos: .xlsx, .xlsm, .xltx, .xltm, .xls e .xlsb. "
+            "Arquivos com macros são lidos como dados; as macros não são executadas."
+        )
     )
 
     if uploaded_files:
