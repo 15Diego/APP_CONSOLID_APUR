@@ -1,153 +1,60 @@
-# Consolidador de Relatórios Base
+# Consolidador de Apuração
 
-[![Streamlit](https://img.shields.io/badge/Streamlit-FF4B4B?logo=streamlit&logoColor=white)](https://streamlit.io)
-[![Python](https://img.shields.io/badge/Python-3.8+-3776AB?logo=python&logoColor=white)](https://www.python.org)
+Aplicação Streamlit para pré-validar, consolidar, analisar e auditar planilhas fiscais. A versão atual usa **Supabase** para autenticação, perfis reutilizáveis, histórico de processamentos, arquivos privados e trilha de auditoria.
 
-Aplicação web moderna para consolidação de múltiplas planilhas Excel em um único arquivo formatado.
+## Funcionalidades
 
-## ✨ Funcionalidades
+| Área | Recursos |
+|---|---|
+| Upload | `.xlsx`, `.xlsm`, `.xltx`, `.xltm`, `.xls` e `.xlsb`, com validação de tamanho e prévia de estrutura |
+| Leitura | Detecção automática de cabeçalho, busca tolerante de aba e alinhamento de colunas |
+| Filtros | `CFOP`, `TES`, `Tipo de Movimento`, `Descrição do Produto`, período, filial e `UF` |
+| Qualidade | Duplicidades, campos vazios, distribuição de `CFOP`/`TES`, totais e conferência por arquivo |
+| Exportação | Excel profissional, CSV brasileiro com separador `;` e decimal `,`, e relatório de processamento |
+| Persistência | Perfis como `AGLO – Relatório Base`, histórico, auditoria e downloads privados |
+| Acesso | Exatamente dois perfis: `admin` e `usuário` |
 
-- 📤 **Upload múltiplo** de arquivos Excel: `.xlsx`, `.xlsm`, `.xltx`, `.xltm`, `.xls` e `.xlsb`
-- 🔍 **Detecção automática** de cabeçalhos
-- 📊 **Consolidação inteligente** com alinhamento de colunas
-- 🔗 **Rastreabilidade** completa (origem e linha de cada registro)
-- 💅 **Formatação profissional** automática (tabelas, filtros, larguras)
-- 📥 **Download** em Excel ou CSV
-- 🌐 **Interface web** responsiva e moderna
+## Arquitetura
 
-## 🚀 Início Rápido
+O Streamlit executa o processamento das planilhas e usa o Supabase para autenticação, banco de dados e armazenamento privado. O primeiro usuário registrado recebe o perfil `admin`; os demais recebem `usuário` e podem ter seu perfil ajustado pela tela **Administração**.
 
-### Instalação
+## Configuração local
 
 ```bash
-# Clone ou navegue até o diretório
-cd 03_Consolidador_Apuração
-
-# Instale as dependências
 pip install -r requirements.txt
-```
-
-### Executar Localmente
-
-```bash
+cp .streamlit/secrets.example.toml .streamlit/secrets.toml
 streamlit run app.py
 ```
 
-### Executar Testes Unitários
+No arquivo `.streamlit/secrets.toml`, informe a `SUPABASE_SERVICE_ROLE_KEY` do projeto. Esse arquivo é confidencial e não deve ser enviado ao GitHub.
+
+## Deploy no Streamlit Cloud
+
+1. Faça push deste repositório para o GitHub.
+2. No Streamlit Cloud, abra **App settings → Secrets**.
+3. Copie o conteúdo de `.streamlit/secrets.example.toml` e substitua o valor da `SUPABASE_SERVICE_ROLE_KEY` pela chave correspondente do Supabase.
+4. Confirme que o arquivo principal é `app.py` e reinicie o app.
+
+> A chave de serviço deve ficar somente nos secrets do Streamlit Cloud. Ela nunca deve ser colocada no código, em commits ou em variáveis expostas ao navegador.
+
+## Banco de dados Supabase
+
+O arquivo `supabase_schema.sql` contém a estrutura de usuários, perfis, processamentos, arquivos, auditoria e regras de segurança. A migração já foi aplicada no projeto Supabase associado.
+
+## Testes
 
 ```bash
 python3 -m unittest discover tests
+python3 -m py_compile app.py supabase_repository.py consolidate_relatorio_base.py
 ```
 
-A aplicação abrirá automaticamente no navegador em `http://localhost:8501`
+## Estrutura
 
-## 🎯 Como Usar
-
-1. **Configure as opções** na barra lateral:
-   - Nome da aba a consolidar
-   - Detecção automática de cabeçalho (ou manual)
-   - Opções avançadas (texto, auditoria, formatação)
-
-2. **Selecione os arquivos** Excel para consolidar. São aceitos `.xlsx`, `.xlsm`, `.xltx`, `.xltm`, `.xls` e `.xlsb`.
-   - Arquivos `.xlsm` e `.xltm` são lidos apenas como dados; macros não são executadas nem copiadas para o relatório consolidado.
-
-3. **Clique em "Consolidar"**
-
-4. **Visualize os resultados** nas abas:
-   - Dados consolidados
-   - Resumo do processamento
-
-5. **Baixe o resultado** em Excel ou CSV
-
-## 📁 Estrutura do Projeto
-
+```text
+app.py                         # Interface Streamlit atual
+app_legacy.py                  # Backup da interface anterior
+consolidate_relatorio_base.py  # Núcleo de leitura, filtros e exportação Excel
+supabase_repository.py         # Autenticação, armazenamento, histórico e auditoria
+supabase_schema.sql            # Estrutura do banco Supabase
+.streamlit/secrets.example.toml # Modelo de configuração confidencial
 ```
-03_Consolidador_Apuração/
-├── app.py                           # Aplicação Streamlit
-├── consolidate_relatorio_base.py    # Lógica de consolidação (core)
-├── requirements.txt                 # Dependências Python
-└── README.md                        # Este arquivo
-```
-
-## 🛠️ Tecnologias
-
-- **[Streamlit](https://streamlit.io)** - Framework web moderno para Python
-- **[pandas](https://pandas.pydata.org/)** - Manipulação de dados
-- **[openpyxl](https://openpyxl.readthedocs.io/)** - Leitura de `.xlsx`, `.xlsm`, `.xltx` e `.xltm`, além da escrita do relatório consolidado
-- **[xlrd](https://xlrd.readthedocs.io/)** - Leitura de arquivos legados `.xls`
-- **[pyxlsb](https://github.com/willtrnr/pyxlsb)** - Leitura de arquivos binários `.xlsb`
-
-## 📝 Versões
-
-### v2.3 - Formatos Excel ampliados
-- Suporte a `.xlsx`, `.xlsm`, `.xltx`, `.xltm`, `.xls` e `.xlsb`
-- Seleção automática da engine de leitura adequada a cada extensão
-- Mensagens de erro específicas para formato inválido, arquivo corrompido e dependência ausente
-- Suporte equivalente na interface web e na interface desktop
-
-### v2.1 - Streamlit (Melhorado)
-- Interface web moderna e modularizada
-- Upload direto de arquivos com limpeza automática de temporários
-- Visualização interativa de dados e resumo de processamento
-- Download instantâneo em Excel e CSV (padrão BR)
-- Tratamento robusto de erros e validação de entradas
-- Otimização de memória para arquivos grandes
-- Testes unitários incluídos
-
-### v2.0 - Streamlit
-- Interface web inicial com Streamlit
-
-### v1.0 - Tkinter (Desktop)
-- GUI desktop com Tkinter
-- Disponível em `consolidate_relatorio_base.py`
-- Execute com: `python consolidate_relatorio_base.py`
-
-## 🎨 Capturas de Tela
-
-> **Nota**: Execute a aplicação para ver a interface moderna e responsiva!
-
-## 🔧 Opções Avançadas
-
-### Ler como Texto
-Preserva zeros à esquerda e evita conversões automáticas de tipos.
-
-### Colunas de Auditoria
-Adiciona informações de rastreabilidade:
-- `ARQUIVO_ORIGEM` - Nome do arquivo de origem
-- `ABA_ORIGEM` - Nome da aba lida
-- `HEADER_LINHA` - Linha onde estava o cabeçalho
-- `LINHA_ORIGEM_EXCEL` - Número da linha original no Excel
-
-### Formatação Profissional
-Aplica automaticamente:
-- Tabelas formatadas do Excel
-- Auto-filtro em todas as colunas
-- Congelamento da linha de cabeçalho
-- Ajuste automático de larguras de coluna
-
-## 🚢 Deploy
-
-### Streamlit Cloud (Gratuito)
-
-1. Faça push do código para GitHub
-2. Acesse [share.streamlit.io](https://share.streamlit.io)
-3. Conecte seu repositório
-4. Deploy automático!
-
-### Outras Opções
-- Heroku
-- AWS (EC2, ECS)
-- Google Cloud Run
-- Azure App Service
-
-## 📞 Suporte
-
-Para problemas ou sugestões, consulte os logs da aplicação ou revise o código em `consolidate_relatorio_base.py`.
-
-## 📄 Licença
-
-Código interno - Uso restrito ao projeto.
-
----
-
-**Desenvolvido com ❤️ usando Streamlit**
