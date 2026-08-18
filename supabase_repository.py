@@ -15,9 +15,20 @@ from supabase import Client, create_client
 
 def _secret(name: str) -> Optional[str]:
     try:
-        return st.secrets.get(name) or st.secrets.get("supabase", {}).get(name.lower())
+        value = st.secrets.get(name) or st.secrets.get("supabase", {}).get(name.lower())
     except Exception:
-        return os.getenv(name)
+        value = os.getenv(name)
+    return str(value).strip() if value else None
+
+
+def _validate_connection_value(name: str, value: str) -> None:
+    try:
+        value.encode("ascii")
+    except UnicodeEncodeError as exc:
+        raise RuntimeError(
+            f"O secret {name} contém um caractere não permitido. Copie apenas o valor real da chave no Supabase, "
+            "sem setas, explicações, aspas extras ou texto de exemplo."
+        ) from exc
 
 
 @st.cache_resource
@@ -28,6 +39,8 @@ def get_supabase() -> Client:
         raise RuntimeError(
             "Supabase não configurado. Informe SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY nos secrets do Streamlit Cloud."
         )
+    _validate_connection_value("SUPABASE_URL", url)
+    _validate_connection_value("SUPABASE_SERVICE_ROLE_KEY", key)
     return create_client(url, key)
 
 

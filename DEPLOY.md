@@ -15,6 +15,8 @@ SUPABASE_SERVICE_ROLE_KEY = "sua_service_role_key_do_supabase"
 
 A `SUPABASE_SERVICE_ROLE_KEY` deve ser copiada de **Supabase → Project Settings → API**. Nunca a inclua em commit, issue, mensagem ou arquivo público.
 
+Copie **somente o valor da chave**. Não inclua setas, comentários, aspas extras, o nome do campo ou textos de instrução, pois esses caracteres impedem a autenticação do cliente Supabase.
+
 ## Publicação
 
 1. Confirme que o repositório `15Diego/APP_CONSOLID_APUR` está na branch `main`.
