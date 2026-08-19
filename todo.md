@@ -6,3 +6,6 @@
 - [x] Remover telas e procedimentos de login/cadastro da aplicação Streamlit.
 - [x] Adaptar a consolidação e as funcionalidades complementares para acesso direto sem sessão autenticada.
 - [ ] Testar a versão pública sem login e atualizar o repositório conectado ao Streamlit Cloud.
+- [x] Criar seleção visual de mapeamentos padrão na aba Perfis.
+- [x] Permitir adicionar, editar e remover equivalências de colunas personalizadas nos perfis.
+- [ ] Testar a experiência dinâmica de mapeamentos e enviar a atualização ao GitHub.

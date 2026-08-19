@@ -61,6 +61,18 @@ def default_configuration() -> dict[str, Any]:
     }
 
 
+STANDARD_MAPPING_OPTIONS: dict[str, tuple[str, str]] = {
+    "CFOP Fiscal → CFOP": ("CFOP Fiscal", "CFOP"),
+    "C.F.O.P. → CFOP": ("C.F.O.P.", "CFOP"),
+    "Tp. Mov → Tipo de Movimento": ("Tp. Mov", "Tipo de Movimento"),
+    "Movimento → Tipo de Movimento": ("Movimento", "Tipo de Movimento"),
+    "Desc. Produto → Descrição do Produto": ("Desc. Produto", "Descrição do Produto"),
+    "Descricao Produto → Descrição do Produto": ("Descricao Produto", "Descrição do Produto"),
+    "Loja → filial": ("Loja", "filial"),
+    "Estado → UF": ("Estado", "UF"),
+}
+
+
 def init_state() -> None:
     defaults = {
         "prevalidation": [],
@@ -141,6 +153,44 @@ def parse_mapping(text: str) -> dict[str, str]:
 
 def mapping_to_text(mapping: dict[str, str]) -> str:
     return "\n".join(f"{source} => {target}" for source, target in mapping.items())
+
+
+def profile_mapping_editor(saved_mapping: dict[str, str]) -> dict[str, str]:
+    selected_presets = [
+        label
+        for label, pair in STANDARD_MAPPING_OPTIONS.items()
+        if saved_mapping.get(pair[0]) == pair[1]
+    ]
+    preset_pairs = set(STANDARD_MAPPING_OPTIONS.values())
+    custom_rows = [
+        {"Coluna de origem": source, "Nome padronizado": target}
+        for source, target in saved_mapping.items()
+        if (source, target) not in preset_pairs
+    ]
+    st.caption("Selecione equivalências frequentes ou acrescente regras específicas dos seus arquivos.")
+    selected = st.multiselect(
+        "Mapeamentos sugeridos",
+        options=list(STANDARD_MAPPING_OPTIONS),
+        default=selected_presets,
+        help="Cada seleção converte a coluna de origem para o nome padronizado no relatório consolidado.",
+    )
+    edited_rows = st.data_editor(
+        pd.DataFrame(custom_rows, columns=["Coluna de origem", "Nome padronizado"]),
+        num_rows="dynamic",
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "Coluna de origem": st.column_config.TextColumn("Coluna de origem", required=True),
+            "Nome padronizado": st.column_config.TextColumn("Nome padronizado", required=True),
+        },
+    )
+    mapping = {source: target for label in selected for source, target in [STANDARD_MAPPING_OPTIONS[label]]}
+    for _, row in edited_rows.iterrows():
+        source = clean_text(row.get("Coluna de origem"))
+        target = clean_text(row.get("Nome padronizado"))
+        if source and target:
+            mapping[source] = target
+    return mapping
 
 
 def available_values(reports: list[dict[str, Any]], field: str) -> list[str]:
@@ -299,16 +349,29 @@ def run_consolidation(files: list[Any], configuration: dict[str, Any]) -> None:
 
 def profiles_screen() -> None:
     st.title("Perfis")
-    st.caption("Os perfis desta tela são reutilizáveis enquanto esta sessão permanecer aberta.")
+    st.caption("Crie perfis com regras de leitura e mapeamentos por seleção. Eles ficam disponíveis enquanto esta sessão permanecer aberta.")
+    profile_names = list(st.session_state.profiles)
+    base_name = st.selectbox("Editar a partir do perfil", profile_names, help="Use um perfil existente como ponto de partida.")
+    base_profile = st.session_state.profiles[base_name]
     with st.form("profile_save"):
-        name = st.text_input("Nome do perfil", value="AGLO – Relatório Base")
-        sheet = st.text_input("Aba do perfil", value=DEFAULT_SHEET_NAME)
-        header = st.number_input("Linha de cabeçalho", min_value=1, value=2)
-        mapping = st.text_area("Mapeamentos", value="CFOP Fiscal => CFOP\nC.F.O.P. => CFOP")
+        name = st.text_input("Nome do perfil", value=base_name)
+        sheet = st.text_input("Aba do perfil", value=base_profile["sheet_name"])
+        header = st.number_input("Linha de cabeçalho", min_value=1, value=int(base_profile["header_line"]))
+        st.markdown("#### Mapeamentos de colunas")
+        mapping = profile_mapping_editor(base_profile.get("mapping", {}))
         if st.form_submit_button("Salvar perfil", type="primary"):
-            st.session_state.profiles[name] = {"sheet_name": sheet, "auto_header": True, "header_line": int(header), "mapping": parse_mapping(mapping), "filters": {}}
-            st.success("Perfil salvo para a sessão atual.")
-    st.dataframe(pd.DataFrame({"Perfil": list(st.session_state.profiles)}), use_container_width=True, hide_index=True)
+            if not clean_text(name):
+                st.error("Informe um nome para o perfil.")
+            else:
+                st.session_state.profiles[name.strip()] = {"sheet_name": sheet, "auto_header": True, "header_line": int(header), "mapping": mapping, "filters": {}}
+                st.success("Perfil salvo para a sessão atual.")
+    overview = pd.DataFrame(
+        [
+            {"Perfil": profile_name, "Mapeamentos": len(config.get("mapping", {})), "Aba": config.get("sheet_name", "-")}
+            for profile_name, config in st.session_state.profiles.items()
+        ]
+    )
+    st.dataframe(overview, use_container_width=True, hide_index=True)
 
 
 def history_screen() -> None:
